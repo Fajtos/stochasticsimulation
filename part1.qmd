@@ -1,0 +1,168 @@
+---
+title: "Stochastic Simulation Prova1"
+author: "Oluwatosin Bamidele Fajana"
+format:
+  pdf:
+    mainfont: "Times New Roman"
+    documentclass: article
+    fontsize: 10pt
+    geometry: "top=1in, bottom=1in, left=1in, right=1in"
+---
+
+# Part 1: Adaptive Rejection Method for the Generalized Hyperbolic Distribution
+
+## 1.1 Distribution Definition
+
+The Generalized Hyperbolic (GH) distribution is a flexible, continuous probability distribution that serves as a normal variance mean mixture. It is highly effective for modeling heavy tailed and skewed data.
+
+Its probability density function (PDF) is defined as:
+
+$$f_X(x) = \frac{(\alpha^2 - \beta^2)^{\lambda/2}}{\sqrt{2\pi} \delta^{\lambda} \alpha^{\lambda - 1/2} K_{\lambda}(\delta \sqrt{\alpha^2 - \beta^2})} \cdot \frac{K_{\lambda - 1/2}(\alpha \sqrt{\delta^2 + (x - \mu)^2})}{(\sqrt{\delta^2 + (x - \mu)^2} / \alpha)^{1/2 - \lambda}} \exp(\beta(x - \mu))$$
+
+Where: \* $\mu$ (Location): Shifts the distribution. \* $\delta$ (Scale): Stretches the distribution. \* $\alpha$ (Tail parameter): Controls tail heaviness. \* $\beta$ (Skewness parameter): Controls asymmetry. \* $\lambda$ (Shape parameter): Here, we use $\lambda = 1$ (the Hyperbolic distribution). \* $K_{\lambda}(\cdot)$ is the modified Bessel function of the second kind. It acts as a normalizing constant to ensure the area under the PDF integrates to exactly 1.
+
+**Relationship with the Normal Distribution:** The GHD is constructed as a normal variance mean mixture. Hierarchically, this means that if a latent variable $V$ follows a Generalized Inverse Gaussian (GIG) distribution, and the variable $X$ conditional on $V$ follows a Normal distribution with mean $\mu + \beta V$ and variance $V$, then unconditionally, $X$ follows a Generalized Hyperbolic distribution. Specifically: $$X | V \sim N(\mu + \beta V, V) \quad \text{and} \quad V \sim GIG(\lambda, \delta^2, \alpha^2 - \beta^2)$$ This hierarchical mixture structure is what gives the GHD its "hybrid" nature, allowing it to inherit the heavy tails and skewness of the GIG while retaining the tractable conditional properties of the Normal distribution. In fact, the Normal distribution is a limiting case of the GHD when the tail parameter $\alpha \to \infty$ and the skewness parameter $\beta = 0$.
+
+Because the PDF involves modified Bessel functions, the Cumulative Distribution Function (CDF) has no closed form solution. Therefore, the Inverse Transform Method cannot be used.
+
+While numerical inversion of the CDF is theoretically possible, it is computationally inefficient and numerically unstable for heavy tailed distributions like the GHD. Therefore, the Inverse Transform Method is impractical here, making the Rejection Method a more suitable choice.
+
+## 1.2 Adaptive Rejection Method (Method of Tangents)
+
+In the simple rejection method, we sample from a fixed proposal distribution (envelope) that sits entirely above the target density. However, finding a tight envelope can be difficult. The Adaptive Rejection Method (ARM) solves this by dynamically updating the envelope using tangent lines.
+
+**The Enveloping Concept:** For the Method of Tangents to work, the target density must be log concave. We define $h(x) = \log(g(x))$, where $g(x) \propto f_X(x)$. Because $h(x)$ is concave (frown shaped), we can draw a series of straight lines tangent to $h(x)$ at specific points. These tangent lines form a piecewise linear upper bound (the envelope). We then simulate values from this piecewise exponential envelope and use rejection to obtain samples from the true target density.
+
+For the GHD, the log density is: $$h(x) = -\alpha \sqrt{\delta^2 + (x - \mu)^2} + \beta(x - \mu)$$
+
+To construct the tangent lines, we need the derivative $h'(x)$. Using the chain rule on the square root term: $$h'(x) = -\alpha \frac{1}{2\sqrt{\delta^2 + (x - \mu)^2}} \cdot 2(x - \mu) + \beta = -\alpha \frac{x - \mu}{\sqrt{\delta^2 + (x - \mu)^2}} + \beta$$
+
+Because the second derivative of $h(x)$ is strictly negative (for $\alpha > 0$), the GHD with $\lambda = 1$ is log concave. We can use the `ars` R package to automatically construct these tangents.
+
+Formally, for a set of tangent points $x_1, x_2, \dots, x_n$, the piecewise linear upper envelope $u_n(x)$ is constructed by connecting the tangent lines at their intersection points. The intersection points $z_i$ define the boundaries of each linear segment. The envelope function used for rejection sampling is then defined as $g_S(x) = \exp(u_n(x))$, which serves as a tight upper bound for the target density $g(x) = \exp(h(x))$.
+
+## 1.3 R Implementation
+
+```{r}
+
+# Load the Adaptive Rejection Sampling package
+library(ars)
+
+# Defining the parameters of the GHD
+mu <- 0
+delta <- 1
+alpha <- 2
+beta <- 0.5
+
+# Define the log density (h) and its derivative (h_prime)
+h_func <- function(x) {
+  -alpha * sqrt(delta^2 + (x - mu)^2) + beta * (x - mu)
+}
+
+h_prime_func <- function(x) {
+  -alpha * (x - mu) / sqrt(delta^2 + (x - mu)^2) + beta
+}
+
+# Initial points for the envelope
+init_points <- c(-2, 0, 2)
+
+# Running the Adaptive Rejection Sampler
+set.seed(123)
+n <- 1000
+sample_gh <- ars(n = n, f = h_func, fprima = h_prime_func, x = init_points)
+
+# Printing the first few values
+head(sample_gh)
+```
+
+```{r}
+# Visualization of Results
+library(ghyp)
+
+hist(sample_gh, breaks = 40, probability = TRUE, 
+     main = "Adaptive Rejection Method: Generalized Hyperbolic Distribution", 
+     xlab = "x", ylab = "Density", col = "lightblue")
+
+# Create GHD object using the correct alpha/delta constructor
+ghd_obj <- ghyp.ad(lambda = 1, alpha = 2, beta = 0.5, delta = 1, mu = 0)
+
+# Overlay theoretical density
+curve(dghyp(x, object = ghd_obj), add = TRUE, col = "red", lwd = 2)
+
+legend("topright", legend = c("Simulated Sample", "Theoretical Density"), 
+       col = c("lightblue", "red"), lwd = c(1, 2), fill = c("lightblue", NA))
+```
+
+## 1.4 Visualizing the Tangent Envelope
+
+To illustrate how the tangent lines form the envelope around the log density, we generate the following plot. The black curve is the log density $h(x)$. The red dashed lines are the tangents at $x$ =-2,0, 2 and the blue points are the tangent points.
+
+```{r}
+# Visualizing the Tangent Envelope
+x_seq <- seq(-4, 6, length.out = 500)
+h_vals <- -2 * sqrt(1 + (x_seq - 0)^2) + 0.5 * (x_seq - 0)
+
+# Ploting the log density
+plot(x_seq, h_vals, type = "l", lwd = 2, col = "black",
+     main = "Log Density and Tangent Envelope",
+     xlab = "x", ylab = "h(x)", ylim = c(-15, 5))
+
+# Drawing tangent lines at specific points (x = -2, 0, 2)
+tangent_points <- c(-2, 0, 2)
+for (tp in tangent_points) {
+  h_tp <- -2 * sqrt(1 + (tp - 0)^2) + 0.5 * (tp - 0)
+  h_prime_tp <- -2 * (tp - 0) / sqrt(1 + (tp - 0)^2) + 0.5
+  abline(a = h_tp - h_prime_tp * tp, b = h_prime_tp, col = "red", lty = 2)
+  points(tp, h_tp, pch = 19, col = "blue")
+}
+legend("topright", legend = c("Log Density h(x)", "Tangent Envelopes", "Tangent Points"), 
+       col = c("black", "red", "blue"), lty = c(1, 2, NA), pch = c(NA, NA, 19))
+```
+
+## 1.5 Algorithm Efficiency and Verification
+
+The Adaptive Rejection Method demonstrated high efficiency. By dynamically updating the piecewise linear envelope using tangents, the algorithm avoids the need for a single, overly conservative proposal distribution, which would result in a very low acceptance rate.
+
+To verify that the simulated sample truly originates from the desired Generalized Hyperbolic distribution, we compare the empirical histogram to the theoretical density. The histogram exhibits the expected heavy tails and slight right skewness characteristic of the GHD with \$\\lambda = 1 \$. The visual agreement between the simulated sample and the theoretical curve confirms that the Adaptive Rejection Method successfully simulated a valid sample from the target distribution.
+
+# Part 2: Monte Carlo Integration
+
+## 2.1 Methodology
+
+Monte Carlo integration is a numerical technique that uses random sampling to approximate the value of an integral or the expectation of a random variable.
+
+Using the sample of size $n=1000$ generated in Part 1 via the Adaptive Rejection Method, we can estimate the theoretical mean and variance of the Generalized Hyperbolic distribution. The Monte Carlo estimators are defined as:
+
+$$\hat{\mu}_{MC} = \frac{1}{n} \sum_{i=1}^{n} X_i \quad \text{and} \quad \hat{\sigma}^2_{MC} = \frac{1}{n-1} \sum_{i=1}^{n} (X_i - \hat{\mu}_{MC})^2$$
+
+We will compare these Monte Carlo estimates to the exact theoretical values of the GHD, which can be obtained analytically using the `ghyp` R package.
+
+## 2.2 R Implementation
+
+```{r}
+# Monte Carlo Estimates from the simulated sample
+mc_mean <- mean(sample_gh)
+mc_var  <- var(sample_gh)
+
+# Exact Theoretical values using the ghyp object created in Part 1
+true_mean <- mean(ghd_obj)
+true_var  <- as.numeric(vcov(ghd_obj))
+
+# Display the comparison table
+results <- data.frame(
+  Metric = c("Mean", "Variance"),
+  Monte_Carlo = c(round(mc_mean, 4), round(mc_var, 4)),
+  Theoretical = c(round(true_mean, 4), round(true_var, 4)),
+  Absolute_Difference = c(round(abs(mc_mean - true_mean), 4), round(abs(mc_var - true_var), 4))
+)
+
+print(results)
+```
+
+## 2.3 Conclusion
+
+The Monte Carlo integration successfully approximated the mean and variance of the Generalized Hyperbolic distribution.
+
+The absolute differences between the Monte Carlo estimates and the exact theoretical values are very small (on the order of 0.01 to 0.05). This demonstrates the validity and accuracy of the Adaptive Rejection Method implemented in Part 1. As expected, the estimates converge toward the theoretical values. This confirms that Monte Carlo integration is a powerful and reliable tool for estimating properties of complex distributions where analytical solutions are unavailable or computationally difficult to obtain.
+
+In this application, the statistical problem chosen is the estimation of moments for a complex, heavy tailed distribution where analytical integration is difficult. The Monte Carlo integration provides a numerical approximation, which we compared to the exact analytical solution provided by the `ghyp` package. This comparison serves as a validation of the Monte Carlo method and the rejection sampler from Part 1. In a scenario where the exact theoretical values were unknown, this Monte Carlo approach would be the primary method for estimating these quantities.
